@@ -1,0 +1,3 @@
+[[constraint]]
+  name = "github.com/fsnotify/fsnotify"
+  version = "1.4.2"
