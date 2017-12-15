@@ -16,6 +16,7 @@ import (
 const debounceTime = 100 * time.Millisecond
 
 var (
+	mtime          time.Time
 	timeout        time.Duration
 	logFile        string
 	cmd            command.Command
@@ -80,16 +81,33 @@ func handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	if !eventContainsAny(event, fsnotify.Write, fsnotify.Create) {
-		return
+	var restart bool
+
+	if eventContainsAny(event, fsnotify.Write, fsnotify.Create) {
+		restart = true
 	}
 
-	debounce("restart", func() {
-		log.Printf("watcher: restarting %s due to %s", cmd, event.Op)
-		if err := cmd.Restart(); err != nil {
-			restartCh <- err
+	if eventContainsAny(event, fsnotify.Chmod) {
+		info, err := os.Stat(cmd.Path())
+		if err != nil {
+			log.Printf("watcher: error getting file info: %s", err)
+			return
 		}
-	})
+
+		if info.ModTime().After(mtime) {
+			restart = true
+			mtime = info.ModTime()
+		}
+	}
+
+	if restart {
+		debounce("restart", func() {
+			log.Printf("watcher: restarting %s due to %s", cmd, event.Op)
+			if err := cmd.Restart(); err != nil {
+				restartCh <- err
+			}
+		})
+	}
 }
 
 func setup() error {
@@ -113,6 +131,13 @@ func setup() error {
 }
 
 func run() error {
+	info, err := os.Stat(cmd.Path())
+	if err != nil {
+		return err
+	}
+
+	mtime = info.ModTime()
+
 	if err := cmd.Start(); err != nil {
 		return err
 	}
